@@ -1,0 +1,23 @@
+[package]
+name = "lulu-serial-port"
+version = "0.1.0"
+edition = "2021"
+description = "Async serial port manager with lulu-logs integration for automated testing"
+license = "Apache-2.0"
+
+[dependencies]
+
+# Async runtime
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros", "io-util"] }
+
+# Async serial port (wraps the `serialport` crate with tokio AsyncRead/AsyncWrite)
+tokio-serial = "5.4.4"
+
+# lulu-logs MQTT client (source lives in the rust-client sub-directory of the workspace)
+lulu-logs-client = { git = "https://github.com/XdoctorwhoZ/lulu-logs" }
+
+# Error derivation
+thiserror = "1"
+
+# Trace instrumentation
+tracing = "0.1"
