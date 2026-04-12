@@ -20,4 +20,8 @@ pub enum Error {
     /// An error occurred while initialising or communicating with lulu-logs.
     #[error("lulu-logs error: {0}")]
     LuluLogs(String),
+
+    /// Failed to parse or resolve a serial URI.
+    #[error("URI error: {0}")]
+    Uri(#[from] crate::ParseUriError),
 }
