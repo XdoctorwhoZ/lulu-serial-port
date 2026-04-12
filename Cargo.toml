@@ -13,6 +13,9 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "m
 # Async serial port (wraps the `serialport` crate with tokio AsyncRead/AsyncWrite)
 tokio-serial = "5.4.4"
 
+# Serial port enumeration (used to discover ports by USB VID/PID and for the list binary)
+serialport = "4"
+
 # lulu-logs MQTT client (source lives in the rust-client sub-directory of the workspace)
 lulu-logs-client = { git = "https://github.com/XdoctorwhoZ/lulu-logs" }
 
@@ -21,3 +24,7 @@ thiserror = "1"
 
 # Trace instrumentation
 tracing = "0.1"
+
+[[bin]]
+name = "serial-port-list"
+path = "src/bin/serial_port_list.rs"

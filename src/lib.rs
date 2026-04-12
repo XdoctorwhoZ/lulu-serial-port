@@ -30,6 +30,7 @@
 //!         lulu_source: "serial/my-device".to_string(),
 //!         lulu_rx_attribute: "rx".to_string(),
 //!         lulu_tx_attribute: "tx".to_string(),
+//!         ..Default::default()
 //!     };
 //!
 //!     let manager = SerialPortManager::new(serial_config, lulu_config)
@@ -55,14 +56,18 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use tokio_serial::SerialPortBuilderExt;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{broadcast, Mutex};
 use tokio::time::timeout;
-use tokio_serial::SerialPortBuilderExt;
 
 mod error;
+mod uri;
 
 pub use error::Error;
+pub use uri::{parse_serial_uri, ParseUriError, SerialUri};
+// Re-export serialport line-parameter types for convenience.
+pub use serialport::{DataBits, FlowControl, Parity, StopBits};
 // Re-export lulu-logs types so users do not need to depend on lulu-logs-client directly.
 pub use lulu_logs_client::{Data, LogLevel, LuluClientConfig};
 
@@ -79,6 +84,18 @@ pub struct SerialPortConfig {
     /// Baud rate in bits per second (e.g. `115_200`, `9_600`).
     pub baud_rate: u32,
 
+    /// Parity setting.  Defaults to [`Parity::None`].
+    pub parity: Parity,
+
+    /// Number of data bits per frame.  Defaults to [`DataBits::Eight`].
+    pub data_bits: DataBits,
+
+    /// Stop-bit configuration.  Defaults to [`StopBits::One`].
+    pub stop_bits: StopBits,
+
+    /// Flow-control mode.  Defaults to [`FlowControl::None`].
+    pub flow_control: FlowControl,
+
     /// lulu-logs source segments for this device (e.g. `"serial/my-device"`).
     ///
     /// This value is used as the `source` argument in all `lulu_publish` calls
@@ -92,6 +109,22 @@ pub struct SerialPortConfig {
 
     /// lulu-logs attribute name for transmitted (TX) messages (e.g. `"tx"`).
     pub lulu_tx_attribute: String,
+}
+
+impl Default for SerialPortConfig {
+    fn default() -> Self {
+        Self {
+            port_name: String::new(),
+            baud_rate: 9_600,
+            parity: Parity::None,
+            data_bits: DataBits::Eight,
+            stop_bits: StopBits::One,
+            flow_control: FlowControl::None,
+            lulu_source: String::new(),
+            lulu_rx_attribute: "rx".to_string(),
+            lulu_tx_attribute: "tx".to_string(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +146,87 @@ pub struct SerialPortManager {
 }
 
 impl SerialPortManager {
+    /// Opens a serial port described by a serial URI and starts the background
+    /// reader task.
+    ///
+    /// This is a convenience constructor that combines [`SerialUri::parse`],
+    /// [`SerialUri::resolve_port`] and [`Self::new`].  The serial URI supplies
+    /// the port name (or USB VID/PID for automatic discovery) and the line
+    /// parameters (baud rate, parity, …).  The lulu-logs routing fields must
+    /// be supplied separately because they are not part of the URI.
+    ///
+    /// # Arguments
+    ///
+    /// * `uri` — serial URI string (see [`SerialUri`]).
+    /// * `lulu_source` — lulu-logs source path (e.g. `"serial/my-device"`).
+    /// * `lulu_rx_attribute` — lulu-logs attribute for received data (e.g. `"rx"`).
+    /// * `lulu_tx_attribute` — lulu-logs attribute for transmitted data (e.g. `"tx"`).
+    /// * `lulu_config` — lulu-logs client configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Uri`] when the URI cannot be parsed or no matching
+    /// port is found, [`Error::SerialPort`] when the port cannot be opened,
+    /// and [`Error::LuluLogs`] when lulu-logs initialisation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use lulu_serial_port::SerialPortManager;
+    /// use lulu_logs_client::LuluClientConfig;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let lulu_config = LuluClientConfig::default();
+    ///
+    ///     // Open by device name
+    ///     let _mgr = SerialPortManager::from_uri(
+    ///         "serial:///dev/ttyUSB0?baud=115200",
+    ///         "serial/my-device",
+    ///         "rx",
+    ///         "tx",
+    ///         lulu_config.clone(),
+    ///     )
+    ///     .await
+    ///     .unwrap();
+    ///
+    ///     // Open by USB VID/PID (preferred — survives reboots)
+    ///     let _mgr2 = SerialPortManager::from_uri(
+    ///         "serial://?vid=0x2341&pid=0x0043&baud=115200",
+    ///         "serial/my-device",
+    ///         "rx",
+    ///         "tx",
+    ///         lulu_config,
+    ///     )
+    ///     .await
+    ///     .unwrap();
+    /// }
+    /// ```
+    pub async fn from_uri(
+        uri: &str,
+        lulu_source: impl Into<String>,
+        lulu_rx_attribute: impl Into<String>,
+        lulu_tx_attribute: impl Into<String>,
+        lulu_config: LuluClientConfig,
+    ) -> Result<Self, Error> {
+        let serial_uri = SerialUri::parse(uri)?;
+        let port_name = serial_uri.resolve_port()?;
+
+        let serial_config = SerialPortConfig {
+            port_name,
+            baud_rate: serial_uri.baud_rate,
+            parity: serial_uri.parity,
+            data_bits: serial_uri.data_bits,
+            stop_bits: serial_uri.stop_bits,
+            flow_control: serial_uri.flow_control,
+            lulu_source: lulu_source.into(),
+            lulu_rx_attribute: lulu_rx_attribute.into(),
+            lulu_tx_attribute: lulu_tx_attribute.into(),
+        };
+
+        Self::new(serial_config, lulu_config).await
+    }
+
     /// Opens `serial_config.port_name` at `serial_config.baud_rate` and starts
     /// the background reader task.
     ///
@@ -138,8 +252,12 @@ impl SerialPortManager {
             Err(e) => return Err(Error::LuluLogs(e.to_string())),
         }
 
-        // Open the serial port.
+        // Open the serial port with all configured line parameters.
         let port = tokio_serial::new(&serial_config.port_name, serial_config.baud_rate)
+            .parity(serial_config.parity)
+            .data_bits(serial_config.data_bits)
+            .stop_bits(serial_config.stop_bits)
+            .flow_control(serial_config.flow_control)
             .open_native_async()
             .map_err(|e| Error::SerialPort(e.to_string()))?;
 
