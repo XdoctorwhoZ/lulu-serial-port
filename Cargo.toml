@@ -2,7 +2,7 @@
 name = "lulu-serial-port"
 version = "0.1.0"
 edition = "2021"
-description = "Async serial port manager with lulu-logs integration for automated testing"
+description = "Async serial port manager with MQTT integration for automated testing"
 license = "Apache-2.0"
 
 [dependencies]
@@ -16,8 +16,8 @@ tokio-serial = "5.4.4"
 # Serial port enumeration (used to discover ports by USB VID/PID and for the list binary)
 serialport = "4"
 
-# lulu-logs MQTT client (source lives in the rust-client sub-directory of the workspace)
-lulu-logs-client = { git = "https://github.com/XdoctorwhoZ/lulu-logs" }
+# MQTT async client (publishes serial traffic to an MQTT broker)
+rumqttc = "0.25"
 
 # Error derivation
 thiserror = "1"

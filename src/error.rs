@@ -17,9 +17,9 @@ pub enum Error {
     #[error("serial port reader task closed")]
     ChannelClosed,
 
-    /// An error occurred while initialising or communicating with lulu-logs.
-    #[error("lulu-logs error: {0}")]
-    LuluLogs(String),
+    /// An error occurred while initialising or communicating with the MQTT broker.
+    #[error("MQTT error: {0}")]
+    Mqtt(String),
 
     /// Failed to parse or resolve a serial URI.
     #[error("URI error: {0}")]
