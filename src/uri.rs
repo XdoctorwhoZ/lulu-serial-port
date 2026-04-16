@@ -78,20 +78,30 @@ pub struct SerialUri {
     /// `None` when the URI uses USB VID/PID discovery instead.
     pub port_name: Option<String>,
 
-    /// Baud rate in bits per second.  Defaults to `9600`.
-    pub baud_rate: u32,
+    /// Baud rate in bits per second.
+    ///
+    /// `None` when no `baud` parameter was present in the URI.
+    pub baud_rate: Option<u32>,
 
-    /// Parity setting.  Defaults to [`Parity::None`].
-    pub parity: Parity,
+    /// Parity setting.
+    ///
+    /// `None` when no `parity` parameter was present in the URI.
+    pub parity: Option<Parity>,
 
-    /// Number of data bits.  Defaults to [`DataBits::Eight`].
-    pub data_bits: DataBits,
+    /// Number of data bits.
+    ///
+    /// `None` when no `data` parameter was present in the URI.
+    pub data_bits: Option<DataBits>,
 
-    /// Stop-bit configuration.  Defaults to [`StopBits::One`].
-    pub stop_bits: StopBits,
+    /// Stop-bit configuration.
+    ///
+    /// `None` when no `stop` parameter was present in the URI.
+    pub stop_bits: Option<StopBits>,
 
-    /// Flow-control mode.  Defaults to [`FlowControl::None`].
-    pub flow_control: FlowControl,
+    /// Flow-control mode.
+    ///
+    /// `None` when no `flow` parameter was present in the URI.
+    pub flow_control: Option<FlowControl>,
 
     /// USB vendor ID for device discovery.
     pub vid: Option<u16>,
@@ -119,11 +129,12 @@ impl SerialUri {
     ///
     /// let cfg = SerialUri::parse("serial:///dev/ttyUSB0?baud=115200").unwrap();
     /// assert_eq!(cfg.port_name.as_deref(), Some("/dev/ttyUSB0"));
-    /// assert_eq!(cfg.baud_rate, 115_200);
+    /// assert_eq!(cfg.baud_rate, Some(115_200));
     ///
     /// let cfg = SerialUri::parse("serial://?vid=0x2341&pid=0x0043").unwrap();
     /// assert_eq!(cfg.vid, Some(0x2341));
     /// assert_eq!(cfg.pid, Some(0x0043));
+    /// assert_eq!(cfg.baud_rate, None);
     /// ```
     pub fn parse(uri: &str) -> Result<Self, ParseUriError> {
         // Strip the mandatory "serial://" prefix.
@@ -146,11 +157,11 @@ impl SerialUri {
         };
 
         // Defaults
-        let mut baud_rate: u32 = 9_600;
-        let mut parity = Parity::None;
-        let mut data_bits = DataBits::Eight;
-        let mut stop_bits = StopBits::One;
-        let mut flow_control = FlowControl::None;
+        let mut baud_rate: Option<u32> = None;
+        let mut parity: Option<Parity> = None;
+        let mut data_bits: Option<DataBits> = None;
+        let mut stop_bits: Option<StopBits> = None;
+        let mut flow_control: Option<FlowControl> = None;
         let mut vid: Option<u16> = None;
         let mut pid: Option<u16> = None;
         let mut usb_serial: Option<String> = None;
@@ -160,37 +171,37 @@ impl SerialUri {
             let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
             match key {
                 "baud" | "baud_rate" => {
-                    baud_rate = value.parse::<u32>().map_err(|_| ParseUriError::InvalidParam {
+                    baud_rate = Some(value.parse::<u32>().map_err(|_| ParseUriError::InvalidParam {
                         key: key.to_string(),
                         reason: format!("\"{}\" is not a valid integer", value),
-                    })?;
+                    })?);
                 }
                 "parity" => {
-                    parity = parse_parity(value).map_err(|reason| ParseUriError::InvalidParam {
+                    parity = Some(parse_parity(value).map_err(|reason| ParseUriError::InvalidParam {
                         key: key.to_string(),
                         reason,
-                    })?;
+                    })?);
                 }
                 "data" => {
                     data_bits =
-                        parse_data_bits(value).map_err(|reason| ParseUriError::InvalidParam {
+                        Some(parse_data_bits(value).map_err(|reason| ParseUriError::InvalidParam {
                             key: key.to_string(),
                             reason,
-                        })?;
+                        })?);
                 }
                 "stop" => {
                     stop_bits =
-                        parse_stop_bits(value).map_err(|reason| ParseUriError::InvalidParam {
+                        Some(parse_stop_bits(value).map_err(|reason| ParseUriError::InvalidParam {
                             key: key.to_string(),
                             reason,
-                        })?;
+                        })?);
                 }
                 "flow" => {
                     flow_control =
-                        parse_flow_control(value).map_err(|reason| ParseUriError::InvalidParam {
+                        Some(parse_flow_control(value).map_err(|reason| ParseUriError::InvalidParam {
                             key: key.to_string(),
                             reason,
-                        })?;
+                        })?);
                 }
                 "vid" => {
                     vid = Some(parse_u16_hex(value).map_err(|reason| {
@@ -319,21 +330,21 @@ impl SerialUri {
             params.push(format!("serial={}", s));
         }
 
-        if self.baud_rate != 9_600 {
-            params.push(format!("baud={}", self.baud_rate));
+        if let Some(baud) = self.baud_rate {
+            params.push(format!("baud={}", baud));
         }
 
-        let parity_str = match self.parity {
-            Parity::None => None,
-            Parity::Even => Some("e"),
-            Parity::Odd => Some("o"),
-        };
-        if let Some(p) = parity_str {
+        if let Some(parity) = self.parity {
+            let p = match parity {
+                Parity::None => "n",
+                Parity::Even => "e",
+                Parity::Odd => "o",
+            };
             params.push(format!("parity={}", p));
         }
 
-        if !matches!(self.data_bits, DataBits::Eight) {
-            let d = match self.data_bits {
+        if let Some(data_bits) = self.data_bits {
+            let d = match data_bits {
                 DataBits::Five => 5,
                 DataBits::Six => 6,
                 DataBits::Seven => 7,
@@ -342,16 +353,20 @@ impl SerialUri {
             params.push(format!("data={}", d));
         }
 
-        if !matches!(self.stop_bits, StopBits::One) {
-            params.push("stop=2".to_string());
+        if let Some(stop_bits) = self.stop_bits {
+            let s = match stop_bits {
+                StopBits::One => 1,
+                StopBits::Two => 2,
+            };
+            params.push(format!("stop={}", s));
         }
 
-        let flow_str = match self.flow_control {
-            FlowControl::None => None,
-            FlowControl::Hardware => Some("hw"),
-            FlowControl::Software => Some("sw"),
-        };
-        if let Some(f) = flow_str {
+        if let Some(flow_control) = self.flow_control {
+            let f = match flow_control {
+                FlowControl::None => "none",
+                FlowControl::Hardware => "hw",
+                FlowControl::Software => "sw",
+            };
             params.push(format!("flow={}", f));
         }
 
@@ -452,16 +467,16 @@ mod tests {
     fn parse_port_name_and_baud() {
         let uri = SerialUri::parse("serial:///dev/ttyUSB0?baud=115200").unwrap();
         assert_eq!(uri.port_name.as_deref(), Some("/dev/ttyUSB0"));
-        assert_eq!(uri.baud_rate, 115_200);
-        assert!(matches!(uri.parity, Parity::None));
+        assert_eq!(uri.baud_rate, Some(115_200));
+        assert_eq!(uri.parity, None);
     }
 
     #[test]
     fn parse_windows_port() {
         let uri = SerialUri::parse("serial://COM3?baud=9600&parity=e").unwrap();
         assert_eq!(uri.port_name.as_deref(), Some("COM3"));
-        assert_eq!(uri.baud_rate, 9_600);
-        assert!(matches!(uri.parity, Parity::Even));
+        assert_eq!(uri.baud_rate, Some(9_600));
+        assert_eq!(uri.parity, Some(Parity::Even));
     }
 
     #[test]
@@ -487,17 +502,17 @@ mod tests {
             "serial:///dev/ttyS0?baud=4800&parity=o&data=7&stop=2&flow=hw",
         )
         .unwrap();
-        assert_eq!(uri.baud_rate, 4_800);
-        assert!(matches!(uri.parity, Parity::Odd));
-        assert!(matches!(uri.data_bits, DataBits::Seven));
-        assert!(matches!(uri.stop_bits, StopBits::Two));
-        assert!(matches!(uri.flow_control, FlowControl::Hardware));
+        assert_eq!(uri.baud_rate, Some(4_800));
+        assert_eq!(uri.parity, Some(Parity::Odd));
+        assert_eq!(uri.data_bits, Some(DataBits::Seven));
+        assert_eq!(uri.stop_bits, Some(StopBits::Two));
+        assert_eq!(uri.flow_control, Some(FlowControl::Hardware));
     }
 
     #[test]
     fn default_baud_rate() {
         let uri = SerialUri::parse("serial:///dev/ttyUSB0").unwrap();
-        assert_eq!(uri.baud_rate, 9_600);
+        assert_eq!(uri.baud_rate, None);
     }
 
     #[test]
@@ -542,7 +557,7 @@ mod tests {
     #[test]
     fn to_uri_defaults_omitted() {
         let uri = SerialUri::parse("serial:///dev/ttyUSB0").unwrap();
-        // Default baud (9600) and parity (n) are omitted from the output.
+        // Unset fields (None) are omitted from the output.
         assert_eq!(uri.to_uri(), "serial:///dev/ttyUSB0");
     }
 
@@ -562,7 +577,7 @@ mod tests {
     #[test]
     fn parse_serial_uri_fn() {
         let uri = parse_serial_uri("serial:///dev/ttyS1?baud=38400").unwrap();
-        assert_eq!(uri.baud_rate, 38_400);
+        assert_eq!(uri.baud_rate, Some(38_400));
     }
 
     #[test]
@@ -570,5 +585,18 @@ mod tests {
         let uri = SerialUri::parse("serial://?vid=0X2341&pid=0X0043").unwrap();
         assert_eq!(uri.vid, Some(0x2341));
         assert_eq!(uri.pid, Some(0x0043));
+    }
+
+    #[test]
+    fn unset_fields_are_none() {
+        let uri = SerialUri::parse("serial:///dev/ttyUSB0").unwrap();
+        assert_eq!(uri.baud_rate, None);
+        assert_eq!(uri.parity, None);
+        assert_eq!(uri.data_bits, None);
+        assert_eq!(uri.stop_bits, None);
+        assert_eq!(uri.flow_control, None);
+        assert_eq!(uri.vid, None);
+        assert_eq!(uri.pid, None);
+        assert_eq!(uri.usb_serial, None);
     }
 }
