@@ -214,11 +214,11 @@ impl SerialPortManager {
 
         let serial_config = SerialPortConfig {
             port_name,
-            baud_rate: serial_uri.baud_rate,
-            parity: serial_uri.parity,
-            data_bits: serial_uri.data_bits,
-            stop_bits: serial_uri.stop_bits,
-            flow_control: serial_uri.flow_control,
+            baud_rate: serial_uri.baud_rate.unwrap_or(9_600),
+            parity: serial_uri.parity.unwrap_or(Parity::None),
+            data_bits: serial_uri.data_bits.unwrap_or(DataBits::Eight),
+            stop_bits: serial_uri.stop_bits.unwrap_or(StopBits::One),
+            flow_control: serial_uri.flow_control.unwrap_or(FlowControl::None),
             lulu_source: lulu_source.into(),
             lulu_rx_attribute: lulu_rx_attribute.into(),
             lulu_tx_attribute: lulu_tx_attribute.into(),
