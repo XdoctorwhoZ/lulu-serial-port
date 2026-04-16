@@ -334,39 +334,39 @@ impl SerialUri {
             params.push(format!("baud={}", baud));
         }
 
-        let parity_str = match self.parity {
-            Some(Parity::Even) => Some("e"),
-            Some(Parity::Odd) => Some("o"),
-            Some(Parity::None) | None => None,
-        };
-        if let Some(p) = parity_str {
+        if let Some(parity) = self.parity {
+            let p = match parity {
+                Parity::None => "n",
+                Parity::Even => "e",
+                Parity::Odd => "o",
+            };
             params.push(format!("parity={}", p));
         }
 
         if let Some(data_bits) = self.data_bits {
-            if !matches!(data_bits, DataBits::Eight) {
-                let d = match data_bits {
-                    DataBits::Five => 5,
-                    DataBits::Six => 6,
-                    DataBits::Seven => 7,
-                    DataBits::Eight => 8,
-                };
-                params.push(format!("data={}", d));
-            }
+            let d = match data_bits {
+                DataBits::Five => 5,
+                DataBits::Six => 6,
+                DataBits::Seven => 7,
+                DataBits::Eight => 8,
+            };
+            params.push(format!("data={}", d));
         }
 
         if let Some(stop_bits) = self.stop_bits {
-            if !matches!(stop_bits, StopBits::One) {
-                params.push("stop=2".to_string());
-            }
+            let s = match stop_bits {
+                StopBits::One => 1,
+                StopBits::Two => 2,
+            };
+            params.push(format!("stop={}", s));
         }
 
-        let flow_str = match self.flow_control {
-            Some(FlowControl::Hardware) => Some("hw"),
-            Some(FlowControl::Software) => Some("sw"),
-            Some(FlowControl::None) | None => None,
-        };
-        if let Some(f) = flow_str {
+        if let Some(flow_control) = self.flow_control {
+            let f = match flow_control {
+                FlowControl::None => "none",
+                FlowControl::Hardware => "hw",
+                FlowControl::Software => "sw",
+            };
             params.push(format!("flow={}", f));
         }
 
@@ -557,7 +557,7 @@ mod tests {
     #[test]
     fn to_uri_defaults_omitted() {
         let uri = SerialUri::parse("serial:///dev/ttyUSB0").unwrap();
-        // Default baud (9600) and parity (n) are omitted from the output.
+        // Unset fields (None) are omitted from the output.
         assert_eq!(uri.to_uri(), "serial:///dev/ttyUSB0");
     }
 
