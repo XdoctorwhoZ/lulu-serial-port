@@ -57,6 +57,9 @@ impl Default for MqttConfig {
 // MqttHandle (crate-internal)
 // ---------------------------------------------------------------------------
 
+/// Default capacity for the internal `rumqttc` request queue.
+const MQTT_CHANNEL_CAPACITY: usize = 100;
+
 /// A lightweight, cloneable handle to a connected MQTT client.
 ///
 /// Publishing is best-effort: errors are logged at `warn` level but never
@@ -81,7 +84,7 @@ impl MqttHandle {
             MqttOptions::new(&client_id, &config.broker_host, config.broker_port);
         opts.set_keep_alive(Duration::from_secs(config.keep_alive_secs));
 
-        let (client, event_loop) = AsyncClient::new(opts, 100);
+        let (client, event_loop) = AsyncClient::new(opts, MQTT_CHANNEL_CAPACITY);
 
         // Spawn the event-loop driver — it reconnects automatically on error.
         tokio::spawn(mqtt_event_loop(event_loop));
@@ -134,12 +137,20 @@ async fn mqtt_event_loop(mut event_loop: EventLoop) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Generates a short random alphanumeric string for use in MQTT client IDs.
+/// Generates a short unique string for use in MQTT client IDs.
+///
+/// Combines a monotonic counter with the current time to avoid collisions
+/// even when called multiple times within the same nanosecond.
 fn generate_short_id() -> String {
+    use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .subsec_nanos();
-    format!("{:08x}", nanos)
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{:08x}{:04x}", nanos, seq & 0xFFFF)
 }
