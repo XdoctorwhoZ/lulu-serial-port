@@ -1,11 +1,11 @@
 //! # lulu-serial-port
 //!
-//! A Rust library to manage serial ports with [lulu-logs] integration for
+//! A Rust library to manage serial ports with MQTT integration for
 //! automated testing.
 //!
 //! The [`SerialPortManager`] allows you to:
 //! - Open a serial port and read incoming data asynchronously, line by line.
-//! - Log every received and every sent message to a lulu-logs MQTT broker.
+//! - Log every received and every sent message to an MQTT broker.
 //! - Wait asynchronously for a specific pattern to appear in incoming data
 //!   (with a configurable timeout).
 //!
@@ -13,12 +13,11 @@
 //!
 //! ```rust,no_run
 //! use std::time::Duration;
-//! use lulu_serial_port::{SerialPortConfig, SerialPortManager};
-//! use lulu_logs_client::LuluClientConfig;
+//! use lulu_serial_port::{MqttConfig, SerialPortConfig, SerialPortManager};
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     let lulu_config = LuluClientConfig {
+//!     let mqtt_config = MqttConfig {
 //!         broker_host: "127.0.0.1".to_string(),
 //!         broker_port: 1883,
 //!         ..Default::default()
@@ -33,7 +32,7 @@
 //!         ..Default::default()
 //!     };
 //!
-//!     let manager = SerialPortManager::new(serial_config, lulu_config)
+//!     let manager = SerialPortManager::new(serial_config, mqtt_config)
 //!         .await
 //!         .unwrap();
 //!
@@ -50,8 +49,6 @@
 //!     println!("Got: {}", response);
 //! }
 //! ```
-//!
-//! [lulu-logs]: https://github.com/XdoctorwhoZ/lulu-logs
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -62,14 +59,14 @@ use tokio::sync::{broadcast, Mutex};
 use tokio::time::timeout;
 
 mod error;
+mod mqtt;
 mod uri;
 
 pub use error::Error;
+pub use mqtt::MqttConfig;
 pub use uri::{parse_serial_uri, ParseUriError, SerialUri};
 // Re-export serialport line-parameter types for convenience.
 pub use serialport::{DataBits, FlowControl, Parity, StopBits};
-// Re-export lulu-logs types so users do not need to depend on lulu-logs-client directly.
-pub use lulu_logs_client::{Data, LogLevel, LuluClientConfig};
 
 // ---------------------------------------------------------------------------
 // SerialPortConfig
@@ -96,18 +93,17 @@ pub struct SerialPortConfig {
     /// Flow-control mode.  Defaults to [`FlowControl::None`].
     pub flow_control: FlowControl,
 
-    /// lulu-logs source segments for this device (e.g. `"serial/my-device"`).
+    /// MQTT source segments for this device (e.g. `"serial/my-device"`).
     ///
-    /// This value is used as the `source` argument in all `lulu_publish` calls
-    /// made by the manager.  It must follow the lulu-logs naming rules
-    /// (lower-case alphanumeric segments separated by `/`, with `-` allowed
-    /// within a segment).
+    /// This value is used as the `source` argument in all MQTT publish calls
+    /// made by the manager.  The resulting MQTT topic has the form
+    /// `lulu/{source}/{attribute}`.
     pub lulu_source: String,
 
-    /// lulu-logs attribute name for received (RX) messages (e.g. `"rx"`).
+    /// MQTT attribute name for received (RX) messages (e.g. `"rx"`).
     pub lulu_rx_attribute: String,
 
-    /// lulu-logs attribute name for transmitted (TX) messages (e.g. `"tx"`).
+    /// MQTT attribute name for transmitted (TX) messages (e.g. `"tx"`).
     pub lulu_tx_attribute: String,
 }
 
@@ -131,7 +127,7 @@ impl Default for SerialPortConfig {
 // SerialPortManager
 // ---------------------------------------------------------------------------
 
-/// Manages an open serial port with asynchronous I/O and lulu-logs integration.
+/// Manages an open serial port with asynchronous I/O and MQTT integration.
 ///
 /// Dropping the manager aborts the background reader task and closes the port.
 pub struct SerialPortManager {
@@ -139,6 +135,7 @@ pub struct SerialPortManager {
     /// Sender side of the broadcast channel — used both to publish messages and
     /// to create new [`broadcast::Receiver`] handles for [`Self::wait_for`].
     broadcast_tx: broadcast::Sender<String>,
+    mqtt: mqtt::MqttHandle,
     lulu_source: String,
     lulu_tx_attribute: String,
     /// Abort handle for the background reader task; cancelled on [`Drop`].
@@ -152,32 +149,31 @@ impl SerialPortManager {
     /// This is a convenience constructor that combines [`SerialUri::parse`],
     /// [`SerialUri::resolve_port`] and [`Self::new`].  The serial URI supplies
     /// the port name (or USB VID/PID for automatic discovery) and the line
-    /// parameters (baud rate, parity, …).  The lulu-logs routing fields must
-    /// be supplied separately because they are not part of the URI.
+    /// parameters (baud rate, parity, …).  The MQTT routing fields must be
+    /// supplied separately because they are not part of the URI.
     ///
     /// # Arguments
     ///
     /// * `uri` — serial URI string (see [`SerialUri`]).
-    /// * `lulu_source` — lulu-logs source path (e.g. `"serial/my-device"`).
-    /// * `lulu_rx_attribute` — lulu-logs attribute for received data (e.g. `"rx"`).
-    /// * `lulu_tx_attribute` — lulu-logs attribute for transmitted data (e.g. `"tx"`).
-    /// * `lulu_config` — lulu-logs client configuration.
+    /// * `lulu_source` — MQTT source path (e.g. `"serial/my-device"`).
+    /// * `lulu_rx_attribute` — MQTT attribute for received data (e.g. `"rx"`).
+    /// * `lulu_tx_attribute` — MQTT attribute for transmitted data (e.g. `"tx"`).
+    /// * `mqtt_config` — MQTT client configuration.
     ///
     /// # Errors
     ///
     /// Returns [`Error::Uri`] when the URI cannot be parsed or no matching
     /// port is found, [`Error::SerialPort`] when the port cannot be opened,
-    /// and [`Error::LuluLogs`] when lulu-logs initialisation fails.
+    /// and [`Error::Mqtt`] when the MQTT connection fails.
     ///
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use lulu_serial_port::SerialPortManager;
-    /// use lulu_logs_client::LuluClientConfig;
+    /// use lulu_serial_port::{MqttConfig, SerialPortManager};
     ///
     /// #[tokio::main]
     /// async fn main() {
-    ///     let lulu_config = LuluClientConfig::default();
+    ///     let mqtt_config = MqttConfig::default();
     ///
     ///     // Open by device name
     ///     let _mgr = SerialPortManager::from_uri(
@@ -185,7 +181,7 @@ impl SerialPortManager {
     ///         "serial/my-device",
     ///         "rx",
     ///         "tx",
-    ///         lulu_config.clone(),
+    ///         mqtt_config.clone(),
     ///     )
     ///     .await
     ///     .unwrap();
@@ -196,7 +192,7 @@ impl SerialPortManager {
     ///         "serial/my-device",
     ///         "rx",
     ///         "tx",
-    ///         lulu_config,
+    ///         MqttConfig::default(),
     ///     )
     ///     .await
     ///     .unwrap();
@@ -207,7 +203,7 @@ impl SerialPortManager {
         lulu_source: impl Into<String>,
         lulu_rx_attribute: impl Into<String>,
         lulu_tx_attribute: impl Into<String>,
-        lulu_config: LuluClientConfig,
+        mqtt_config: MqttConfig,
     ) -> Result<Self, Error> {
         let serial_uri = SerialUri::parse(uri)?;
         let port_name = serial_uri.resolve_port()?;
@@ -224,33 +220,30 @@ impl SerialPortManager {
             lulu_tx_attribute: lulu_tx_attribute.into(),
         };
 
-        Self::new(serial_config, lulu_config).await
+        Self::new(serial_config, mqtt_config).await
     }
 
     /// Opens `serial_config.port_name` at `serial_config.baud_rate` and starts
     /// the background reader task.
     ///
-    /// # lulu-logs initialisation
+    /// # MQTT initialisation
     ///
-    /// If lulu-logs has not yet been initialised the manager calls
-    /// [`lulu_logs_client::lulu_init`] with `lulu_config`.  If it was already
-    /// initialised (e.g. by another component or a previous call) `lulu_config`
-    /// is silently ignored.
+    /// An MQTT client is created and connected to the broker described by
+    /// `mqtt_config`.  The connection is maintained in the background; if it
+    /// drops the client will reconnect automatically with exponential
+    /// back-off.
     ///
     /// # Errors
     ///
     /// - [`Error::SerialPort`] — the port cannot be opened (wrong path, in use,
     ///   wrong permissions, …).
-    /// - [`Error::LuluLogs`] — lulu-logs could not be initialised.
+    /// - [`Error::Mqtt`] — the MQTT client could not be created.
     pub async fn new(
         serial_config: SerialPortConfig,
-        lulu_config: LuluClientConfig,
+        mqtt_config: MqttConfig,
     ) -> Result<Self, Error> {
-        // Initialise lulu-logs (idempotent — AlreadyInitialized is not an error).
-        match lulu_logs_client::lulu_init(lulu_config) {
-            Ok(()) | Err(lulu_logs_client::LuluError::AlreadyInitialized) => {}
-            Err(e) => return Err(Error::LuluLogs(e.to_string())),
-        }
+        // Connect to the MQTT broker.
+        let mqtt = mqtt::MqttHandle::connect(&mqtt_config).await?;
 
         // Open the serial port with all configured line parameters.
         let port = tokio_serial::new(&serial_config.port_name, serial_config.baud_rate)
@@ -271,9 +264,10 @@ impl SerialPortManager {
         let (broadcast_tx, _initial_rx) = broadcast::channel::<String>(256);
         let broadcast_tx_for_task = broadcast_tx.clone();
 
-        // Clone lulu-logs routing info for the background task.
+        // Clone MQTT handle and routing info for the background task.
         let source = serial_config.lulu_source.clone();
         let rx_attr = serial_config.lulu_rx_attribute.clone();
+        let mqtt_for_task = mqtt.clone();
 
         // Spawn the background reader task.
         let join_handle = tokio::spawn(async move {
@@ -296,13 +290,8 @@ impl SerialPortManager {
 
                         tracing::debug!("serial RX: {:?}", msg);
 
-                        // Publish to lulu-logs (best-effort — ignore errors).
-                        let _ = lulu_logs_client::lulu_publish(
-                            &source,
-                            &rx_attr,
-                            lulu_logs_client::LogLevel::Info,
-                            lulu_logs_client::Data::String(msg.clone()),
-                        );
+                        // Publish to MQTT (best-effort — ignore errors).
+                        mqtt_for_task.publish(&source, &rx_attr, &msg).await;
 
                         // Broadcast to any active wait_for() subscribers.
                         // A send error just means there are no current receivers.
@@ -319,13 +308,14 @@ impl SerialPortManager {
         Ok(Self {
             writer,
             broadcast_tx,
+            mqtt,
             lulu_source: serial_config.lulu_source,
             lulu_tx_attribute: serial_config.lulu_tx_attribute,
             _reader_task_abort: join_handle.abort_handle(),
         })
     }
 
-    /// Writes `data` to the serial port and logs it to lulu-logs.
+    /// Writes `data` to the serial port and logs it to MQTT.
     ///
     /// The bytes are logged as a UTF-8 string (invalid bytes are replaced with
     /// the Unicode replacement character `\u{FFFD}`).
@@ -334,15 +324,12 @@ impl SerialPortManager {
     ///
     /// Returns [`Error::Io`] if the underlying write fails.
     pub async fn send(&self, data: &[u8]) -> Result<(), Error> {
-        // Log to lulu-logs (best-effort — a missing MQTT connection should not
+        // Log to MQTT (best-effort — a missing MQTT connection should not
         // prevent the serial write from happening).
         let data_str = String::from_utf8_lossy(data).into_owned();
-        let _ = lulu_logs_client::lulu_publish(
-            &self.lulu_source,
-            &self.lulu_tx_attribute,
-            lulu_logs_client::LogLevel::Info,
-            lulu_logs_client::Data::String(data_str),
-        );
+        self.mqtt
+            .publish(&self.lulu_source, &self.lulu_tx_attribute, &data_str)
+            .await;
 
         tracing::debug!("serial TX: {} bytes", data.len());
 
