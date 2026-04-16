@@ -14,11 +14,11 @@
 //! ```rust,no_run
 //! use std::time::Duration;
 //! use lulu_serial_port::{SerialPortConfig, SerialPortManager};
-//! use lulu_logs_client::LuluClientConfig;
+//! use lulu_logs_client::LuluConfig;
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     let lulu_config = LuluClientConfig {
+//!     let lulu_config = LuluConfig {
 //!         broker_host: "127.0.0.1".to_string(),
 //!         broker_port: 1883,
 //!         ..Default::default()
@@ -69,7 +69,7 @@ pub use uri::{parse_serial_uri, ParseUriError, SerialUri};
 // Re-export serialport line-parameter types for convenience.
 pub use serialport::{DataBits, FlowControl, Parity, StopBits};
 // Re-export lulu-logs types so users do not need to depend on lulu-logs-client directly.
-pub use lulu_logs_client::{Data, LogLevel, LuluClientConfig};
+pub use lulu_logs_client::{Data, LogLevel, LuluConfig};
 
 // ---------------------------------------------------------------------------
 // SerialPortConfig
@@ -173,11 +173,11 @@ impl SerialPortManager {
     ///
     /// ```rust,no_run
     /// use lulu_serial_port::SerialPortManager;
-    /// use lulu_logs_client::LuluClientConfig;
+    /// use lulu_logs_client::LuluConfig;
     ///
     /// #[tokio::main]
     /// async fn main() {
-    ///     let lulu_config = LuluClientConfig::default();
+    ///     let lulu_config = LuluConfig::default();
     ///
     ///     // Open by device name
     ///     let _mgr = SerialPortManager::from_uri(
@@ -207,7 +207,7 @@ impl SerialPortManager {
         lulu_source: impl Into<String>,
         lulu_rx_attribute: impl Into<String>,
         lulu_tx_attribute: impl Into<String>,
-        lulu_config: LuluClientConfig,
+        lulu_config: LuluConfig,
     ) -> Result<Self, Error> {
         let serial_uri = SerialUri::parse(uri)?;
         let port_name = serial_uri.resolve_port()?;
@@ -244,7 +244,7 @@ impl SerialPortManager {
     /// - [`Error::LuluLogs`] — lulu-logs could not be initialised.
     pub async fn new(
         serial_config: SerialPortConfig,
-        lulu_config: LuluClientConfig,
+        lulu_config: LuluConfig,
     ) -> Result<Self, Error> {
         // Initialise lulu-logs (idempotent — AlreadyInitialized is not an error).
         match lulu_logs_client::lulu_init(lulu_config) {
