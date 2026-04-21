@@ -16,8 +16,8 @@ tokio-serial = "5.4.4"
 # Serial port enumeration (used to discover ports by USB VID/PID and for the list binary)
 serialport = "4"
 
-# lulu-logs MQTT client (source lives in the rust-client sub-directory of the workspace)
-lulu-logs-client = { git = "https://github.com/XdoctorwhoZ/lulu-logs" }
+# lulu-logs MQTT client
+lulu-logs = { git = "https://github.com/XdoctorwhoZ/lulu-logs-rust", tag = "0.1.0" }
 
 # Error derivation
 thiserror = "1"

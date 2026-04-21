@@ -14,7 +14,7 @@
 //! ```rust,no_run
 //! use std::time::Duration;
 //! use lulu_serial_port::{SerialPortConfig, SerialPortManager};
-//! use lulu_logs_client::LuluConfig;
+//! use lulu_logs::LuluConfig;
 //!
 //! #[tokio::main]
 //! async fn main() {
@@ -68,8 +68,8 @@ pub use error::Error;
 pub use uri::{parse_serial_uri, ParseUriError, SerialUri};
 // Re-export serialport line-parameter types for convenience.
 pub use serialport::{DataBits, FlowControl, Parity, StopBits};
-// Re-export lulu-logs types so users do not need to depend on lulu-logs-client directly.
-pub use lulu_logs_client::{Data, LogLevel, LuluConfig};
+// Re-export lulu-logs types so users do not need to depend on lulu-logs directly.
+pub use lulu_logs::{Data, LogLevel, LuluConfig};
 
 // ---------------------------------------------------------------------------
 // SerialPortConfig
@@ -173,7 +173,7 @@ impl SerialPortManager {
     ///
     /// ```rust,no_run
     /// use lulu_serial_port::SerialPortManager;
-    /// use lulu_logs_client::LuluConfig;
+    /// use lulu_logs::LuluConfig;
     ///
     /// #[tokio::main]
     /// async fn main() {
@@ -233,7 +233,7 @@ impl SerialPortManager {
     /// # lulu-logs initialisation
     ///
     /// If lulu-logs has not yet been initialised the manager calls
-    /// [`lulu_logs_client::lulu_init`] with `lulu_config`.  If it was already
+    /// [`lulu_logs::lulu_init`] with `lulu_config`.  If it was already
     /// initialised (e.g. by another component or a previous call) `lulu_config`
     /// is silently ignored.
     ///
@@ -247,8 +247,8 @@ impl SerialPortManager {
         lulu_config: LuluConfig,
     ) -> Result<Self, Error> {
         // Initialise lulu-logs (idempotent — AlreadyInitialized is not an error).
-        match lulu_logs_client::lulu_init(lulu_config) {
-            Ok(()) | Err(lulu_logs_client::LuluError::AlreadyInitialized) => {}
+        match lulu_logs::lulu_init(lulu_config) {
+            Ok(()) | Err(lulu_logs::LuluError::AlreadyInitialized) => {}
             Err(e) => return Err(Error::LuluLogs(e.to_string())),
         }
 
@@ -297,11 +297,11 @@ impl SerialPortManager {
                         tracing::debug!("serial RX: {:?}", msg);
 
                         // Publish to lulu-logs (best-effort — ignore errors).
-                        let _ = lulu_logs_client::lulu_publish(
+                        let _ = lulu_logs::lulu_publish(
                             &source,
                             &rx_attr,
-                            lulu_logs_client::LogLevel::Info,
-                            lulu_logs_client::Data::String(msg.clone()),
+                            lulu_logs::LogLevel::Info,
+                            lulu_logs::Data::String(msg.clone()),
                         );
 
                         // Broadcast to any active wait_for() subscribers.
@@ -337,11 +337,11 @@ impl SerialPortManager {
         // Log to lulu-logs (best-effort — a missing MQTT connection should not
         // prevent the serial write from happening).
         let data_str = String::from_utf8_lossy(data).into_owned();
-        let _ = lulu_logs_client::lulu_publish(
+        let _ = lulu_logs::lulu_publish(
             &self.lulu_source,
             &self.lulu_tx_attribute,
-            lulu_logs_client::LogLevel::Info,
-            lulu_logs_client::Data::String(data_str),
+            lulu_logs::LogLevel::Info,
+            lulu_logs::Data::String(data_str),
         );
 
         tracing::debug!("serial TX: {} bytes", data.len());
